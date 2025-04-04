@@ -1,0 +1,77 @@
+# SPDX-FileCopyrightText: 2025 ProFACE developers
+#
+# SPDX-License-Identifier: MIT
+
+[project]
+dynamic = ["version"]
+name = "proface-abaqus-pre"
+description = "Abaqus to ProFACE preprocessor"
+readme = "README.md"
+authors = [
+    { name = "Stefano Miccoli", email = "stefano.miccoli@polimi.it" }
+]
+mantainers = [
+    { name = "ProFACE developers", email = "proface@polimi.it" }
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: Implementation :: CPython",
+]
+requires-python = ">=3.12"
+dependencies = [
+    "proface-pre>=0.2.0",
+    "h5py>=3.13.0",
+    "numpy>=2.0",
+    "suanpan-abaqus>=0.1.0",
+]
+license = "MIT"
+
+[project.entry-points."proface.preprocessor"]
+abaqus = "proface.abaqus.preprocessor:main"
+
+[project.urls]
+documentation = "https://github.com/ProFACE-dev/proface-abaqus-pre#"
+issues = "https://github.com/ProFACE-dev/proface-abaqus-pre/issues"
+source = "https://github.com/ProFACE-dev/proface-abaqus-pre"
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+#
+# hatch
+#
+[tool.hatch.version]
+source = "vcs"
+[tool.hatch.version.raw-options]
+version_scheme = "release-branch-semver"
+local_scheme = "node-and-date"
+[tool.hatch.build.hooks.vcs]
+version-file = "src/proface/abaqus/preprocessor/_version.py"
+[tool.hatch.build.targets.wheel]
+packages = ["src/proface"]
+
+#
+# ruff
+#
+[tool.ruff]
+line-length = 80
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["A", "ARG", "B", "BLE", "C4", "C90", "COM818",
+  "E", "W", "EM", "F", "FA", "FBT", "FLY", "G", "I", "ICN",
+  "INP", "INT", "ISC", "N", "NPY", "PERF", "PGH", "PIE",
+  "PLE", "PLR", "PLW", "PT", "PYI", "RET", "RUF", "S",
+  "SIM", "SLF", "SLOT", "T10", "T20", "TCH", "TRY", "TID",
+  "UP", "YTT",
+]
+ignore = ["S101", "PT015", "B011", "TRY400"]
+
+
+[tool.ruff.lint.isort]
+known-first-party = ["proface"]
