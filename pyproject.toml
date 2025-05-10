@@ -34,7 +34,7 @@ license = "MIT"
 abaqus = "proface.abaqus.preprocessor:main"
 
 [project.urls]
-documentation = "https://github.com/ProFACE-dev/proface-abaqus-pre#"
+documentation = "https://github.com/ProFACE-dev/proface-abaqus-pre#proface-abaqus-pre"
 issues = "https://github.com/ProFACE-dev/proface-abaqus-pre/issues"
 source = "https://github.com/ProFACE-dev/proface-abaqus-pre"
 
