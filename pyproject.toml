@@ -42,6 +42,12 @@ source = "https://github.com/ProFACE-dev/proface-abaqus-pre"
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    "coverage>=7.11.3",
+    "mypy>=1.18.2",
+]
+
 #
 # hatch
 #
