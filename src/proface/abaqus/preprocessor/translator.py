@@ -236,11 +236,17 @@ def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901
                 nr_ip = _guess_nr_ip(data)
                 data = data.reshape(-1, nr_ip)  # noqa: PLW2901
                 # data["num"] is elnum across columns
-                if not np.all(
+                if len(data["num"]) != len(
+                    h5["elements"][eltype]["numbers"]
+                ) or np.any(
                     data["num"]
-                    == np.expand_dims(h5["elements"][eltype]["numbers"], -1)
+                    != np.expand_dims(h5["elements"][eltype]["numbers"], -1)
                 ):
-                    msg = f"Inconsistent records for {eltype}: element numbers"
+                    msg = (
+                        f"Inconsistent records for {eltype}: "
+                        "results cardinality/numbering different "
+                        "with respect to mesh definition"
+                    )
                     raise ValueError(msg)
                 # data["ipnum"] is 1..nr_ip across rows
                 assert np.all(data["ipnum"] == 1 + np.arange(nr_ip))
