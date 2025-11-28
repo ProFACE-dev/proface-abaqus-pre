@@ -26,7 +26,7 @@ dependencies = [
     "proface-pre>=0.2.0",
     "h5py>=3.13.0",
     "numpy>=2.0",
-    "suanpan-abaqus>=0.1.0",
+    "suanpan-abaqus>=0.2.0b1, <0.3.0",
 ]
 license = "MIT"
 
@@ -81,3 +81,9 @@ ignore = ["S101", "PT015", "B011", "TRY400"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["proface"]
+
+#
+# uv
+#
+[tool.uv]
+prerelease = "explicit"

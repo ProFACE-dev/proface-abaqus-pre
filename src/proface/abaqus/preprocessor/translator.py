@@ -209,8 +209,14 @@ def _write_results(fil, h5, h5_res, name: str, step: int, inc: int) -> None:  # 
     _write_step_output_blocks(fil, h5, h5_k, i)
 
 
-def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901
-    for flag, elset, eltype, data in fil.get_step(i):
+def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901, PLR0912
+    for data_block in fil.get_step(i):
+        flag, elset, eltype, data = (
+            data_block.flag,
+            data_block.set,
+            data_block.eltype,
+            data_block.data,
+        )
         # check block flag: 0 is element output
         if flag != 0:
             logger.warning("Skipping non element output: flag = %d", flag)
@@ -222,7 +228,7 @@ def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901
             continue
 
         # check block element type
-        eltype = _safe_label(eltype)  # noqa: PLW2901
+        eltype = _safe_label(eltype)
         if not eltype.startswith("C3D"):
             logger.warning("Results for element %s ignored", eltype)
             continue
@@ -234,7 +240,7 @@ def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901
             case "integration_point":
                 # reshape data to index as [el_num, ip_num]
                 nr_ip = _guess_nr_ip(data)
-                data = data.reshape(-1, nr_ip)  # noqa: PLW2901
+                data = data.reshape(-1, nr_ip)
                 # data["num"] is elnum across columns
                 if len(data["num"]) != len(
                     h5["elements"][eltype]["numbers"]
@@ -253,6 +259,7 @@ def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901
             case "nodal_averaged":
                 if not np.all(data["num"] == h5["elements"][eltype]["nodes"]):
                     msg = f"Inconsistent records for {eltype}: node numbers"
+                    raise ValueError(msg)
                 assert (data["ipnum"] == 0).all()
             case None:
                 logger.warning("Unknown location code %d", loc)
@@ -265,9 +272,15 @@ def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901
             if name not in ABQ_VAR:
                 logger.warning("Unexpected results code %s", name)
                 continue
+            hdata = data[name].astype(RES_DTYPE)
+            *_, n_dim = hdata.shape
+            assert tuple(_) == data.shape
+            if n_dim == 1:
+                # squeeze sigleton last dimension
+                hdata = hdata.reshape(hdata.shape[:-1])
             dset = h5_k.create_dataset(
                 _h5_path(var=ABQ_VAR[name], loc=ABQ_LOC[loc], eltype=eltype),
-                data=data[name].astype(RES_DTYPE),
+                data=hdata,
             )
             logger.debug("Wrote %s: %s", dset.name, dset.shape)
 
