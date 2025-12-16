@@ -57,10 +57,10 @@ def main(
     )  # 🚀
 
     # compute .fil path
-    if "fil" in job.get("input", {}):
-        filpth = job_path.parent / job["input"]["fil"]
-    else:
-        filpth = job_path.with_suffix(".fil")
+    userpth = job.get("input", {}).get("fil")
+    filpth = (
+        job_path.parent / userpth if userpth else job_path.with_suffix(".fil")
+    )
 
     # run translator
     try:
@@ -176,12 +176,12 @@ def _write_sets(fil, h5):
     h5_sets = h5.create_group("sets")
     h5_sets_node = h5_sets.create_group("node")
     for k, nset in fil.nset.items():
-        k = _safe_label(fil.label.get(k, k))  # noqa: PLW2901
-        h5_sets_node.create_dataset(k, data=nset)
+        kh = _safe_label(fil.label.get(k, k))
+        h5_sets_node.create_dataset(kh, data=nset)
     h5_sets_element = h5_sets.create_group("element")
     for k, elset in fil.elset.items():
-        k = _safe_label(fil.label.get(k, k))  # noqa: PLW2901
-        h5_sets_element.create_dataset(k, data=elset)
+        kh = _safe_label(fil.label.get(k, k))
+        h5_sets_element.create_dataset(kh, data=elset)
 
 
 def _write_results(fil, h5, h5_res, name: str, step: int, inc: int) -> None:  # noqa: PLR0913
