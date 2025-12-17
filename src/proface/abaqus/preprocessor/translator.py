@@ -8,9 +8,9 @@ import collections.abc
 import logging
 from pathlib import Path
 
-import h5py
+import h5py  # type: ignore[import-untyped]
 import numpy as np
-from suanpan.abqfil import AbqFil
+from suanpan.abqfil import AbqFil  # type: ignore[import-untyped]
 
 from proface.preprocessor import PreprocessorError
 
@@ -307,7 +307,7 @@ def _mangle_element_label(label: str, groups) -> str:
     return mangled
 
 
-def _find_step_inc(stepdata, step, inc):
+def _find_step_inc(stepdata, step, inc) -> int:
     """search for requested step/increment"""
 
     if len(stepdata) == 0:
@@ -334,11 +334,10 @@ def _find_step_inc(stepdata, step, inc):
     assert stepdata.ndim == 1
     (i,) = np.nonzero((stepdata["step"] == step) & (stepdata["incr"] == inc))
     assert np.shape(i) == (1,), f"Multiple step blocks found: {i}"
-    i = i.item()
 
     logger.debug("Found: Step %d, increment %d at position %s", step, inc, i)
     assert stepdata[i][["step", "incr"]].item() == (step, inc)
-    return i
+    return i.item()
 
 
 def _guess_nr_ip(data):

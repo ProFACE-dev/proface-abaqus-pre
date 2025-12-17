@@ -87,3 +87,9 @@ known-first-party = ["proface"]
 #
 [tool.uv]
 prerelease = "explicit"
+
+#
+# mypy
+#
+[tool.mypy]
+check_untyped_defs = true
