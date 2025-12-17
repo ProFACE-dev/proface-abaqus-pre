@@ -5,11 +5,15 @@
 """Translator implementation"""
 
 import collections.abc
+import dataclasses
 import logging
+import re
 from pathlib import Path
+from typing import Self
 
 import h5py  # type: ignore[import-untyped]
 import numpy as np
+import numpy.typing as npt
 from suanpan.abqfil import AbqFil  # type: ignore[import-untyped]
 
 from proface.preprocessor import PreprocessorError
@@ -28,11 +32,35 @@ ABQ_LOC = {0: "integration_point", 4: "nodal_averaged"}
 _h5_path = "{var:s}/{loc:s}/{eltype:s}".format
 
 # save results in single precision
-RES_DTYPE = np.dtype("float32")
+RES_CLASS = np.float32
+RES_DTYPE = np.dtype(RES_CLASS)
+# FIXME: be more specific when suanpan has better typing support
+NUM_CLASS = np.integer
 
 
 class AbaqusTranslatorError(PreprocessorError):
     pass
+
+
+@dataclasses.dataclass
+class MeshBloc:
+    """internal structure for caching mesh info"""
+
+    incidences: npt.NDArray[NUM_CLASS]
+    numbers: npt.NDArray[NUM_CLASS]
+
+    def concatenate(self, other: Self) -> None:
+        for f in (i.name for i in dataclasses.fields(self)):
+            old = getattr(self, f)
+            new = getattr(other, f)
+            setattr(self, f, np.concatenate((old, new), axis=0, casting="no"))
+
+    # mb.incidences = np.concatenate(
+    #     (mb.incidences, elbloc["ninc"]), axis=0, casting="no"
+    # )
+    # mb.numbers = np.concatenate(
+    #     (mb.numbers, elbloc["elnum"]), axis=0, casting="no"
+    # )
 
 
 def main(
@@ -149,24 +177,37 @@ def _write_element(fil, h5):
     h5_elements = h5.create_group("elements")
     h5_elements.attrs["number"] = fil.info["nelm"]
     h5_elements.attrs["size"] = fil.info["elsiz"]
-    for elbloc in fil.elm:
-        assert (elbloc["eltyp"] == elbloc["eltyp"][0]).all()
-        eltype = _safe_label(elbloc["eltyp"][0])
-        if eltype in h5_elements:
-            label_m = _mangle_element_label(eltype, h5_elements.keys())
-            logger.warning(
-                "Mapping %s \N{RIGHTWARDS ARROW FROM BAR} %s",
-                eltype,
-                label_m,
-            )
-            eltype = label_m
-        h5_elgroup = h5_elements.create_group(eltype)
-        h5_elgroup.create_dataset("incidences", data=elbloc["ninc"])
-        h5_elgroup.create_dataset("numbers", data=elbloc["elnum"])
 
-        h5_elgroup.create_dataset(
-            "nodes", data=np.unique(h5_elgroup["incidences"])
-        )
+    # scan fil for element blocs
+    blocs: dict[str, MeshBloc] = {}
+    for elbloc in fil.elm:
+        # check elbloc is homogeneous
+        assert (elbloc["eltyp"] == elbloc["eltyp"][0]).all()
+        abqlabel = _label(elbloc["eltyp"][0])
+        eltype = _proface_eltype(abqlabel)
+        if eltype is None:
+            logger.info(
+                "Skipping %d elements of type %s", len(elbloc), abqlabel
+            )
+            continue
+        mb = MeshBloc(incidences=elbloc["ninc"], numbers=elbloc["elnum"])
+        if eltype not in blocs:
+            logger.debug(
+                "Storing %d elements of type %s [topology %s]",
+                len(elbloc),
+                abqlabel,
+                eltype,
+            )
+            blocs[eltype] = mb
+        else:
+            blocs[eltype].concatenate(mb)
+
+    # save in h5
+    for eltype, mb in blocs.items():
+        h5_elgroup = h5_elements.create_group(eltype)
+        h5_elgroup.create_dataset("incidences", data=mb.incidences)
+        h5_elgroup.create_dataset("numbers", data=mb.numbers)
+        h5_elgroup.create_dataset("nodes", data=np.unique(mb.incidences))
 
 
 def _write_sets(fil, h5):
@@ -211,7 +252,7 @@ def _write_results(fil, h5, h5_res, name: str, step: int, inc: int) -> None:  # 
 
 def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901, PLR0912
     for data_block in fil.get_step(i):
-        flag, elset, eltype, data = (
+        flag, elset, abqeltype, data = (
             data_block.flag,
             data_block.set,
             data_block.eltype,
@@ -228,10 +269,10 @@ def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901, PLR0912
             continue
 
         # check block element type
-        eltype = _safe_label(eltype)
-        if not eltype.startswith("C3D"):
-            logger.warning("Results for element %s ignored", eltype)
-            continue
+        abqeltype = _label(abqeltype)
+        eltype = _proface_eltype(abqeltype)
+        if eltype is None:
+            logger.debug("Skipping %s elbloc", eltype)
 
         # check block location
         loc = data["loc"][0]
@@ -296,15 +337,15 @@ def _safe_label(lab: bytes) -> str:
     return slabel.replace("/", "|")
 
 
-def _mangle_element_label(label: str, groups) -> str:
-    assert label in groups
-    i = 1
-    for s in groups:
-        if s.startswith(f"{label:s}@"):
-            i += 1
-    mangled = f"{label:2}@{i:d}"
-    assert mangled not in groups
-    return mangled
+# regex parse C3D(.*) abaqus element type codes
+_c3dre = re.compile(r"(?P<type>C3D(?P<nodes>\d+))(?P<subtype>[A-Z]*)")
+
+
+def _proface_eltype(abq: str) -> str | None:
+    mo = _c3dre.fullmatch(abq)
+    if mo is None:
+        return None
+    return mo["type"]
 
 
 def _find_step_inc(stepdata, step, inc) -> int:
