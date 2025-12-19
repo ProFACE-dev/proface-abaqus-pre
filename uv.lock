@@ -309,15 +309,15 @@ dev = [
 
 [[package]]
 name = "proface-pre"
-version = "0.2.1"
+version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "h5py" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/bd/01083faf1835d8e93e4d76210de36e870ae4c429f5196ea38273340f1527/proface_pre-0.2.1.tar.gz", hash = "sha256:334a725f942b22935e53a66ce020aab0e5f85e801f1b2a1befbab383d451c0bd", size = 8437, upload-time = "2025-09-05T08:27:39.303Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5c/b6/94354d3fb54727d9345fc2bf2d67e5faf5d83a0d65b6d0db4e44a50de174/proface_pre-0.2.2.tar.gz", hash = "sha256:084a71c24726b0c74805d7260d538a5806e1ae548513221e5ff4226f0c261687", size = 8535, upload-time = "2025-12-19T13:05:39.626Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/7f/fabef1c22a169c8fd0eeff07fabd8ac08622590668101e961f4bdabc82bb/proface_pre-0.2.1-py3-none-any.whl", hash = "sha256:0e571f5a35cb56bac4c14774eec8cf8a860aaa44e6b39d11588ad17ac95b7a16", size = 4734, upload-time = "2025-09-05T08:27:38.178Z" },
+    { url = "https://files.pythonhosted.org/packages/c0/49/11a634154435767f6b4476e9f099ac9d909d86b0a6151acd6750d323d6ed/proface_pre-0.2.2-py3-none-any.whl", hash = "sha256:f99e1433d61b45a2614a42f81f1c658724c13e147ce5cf7a4e52c0e8215948a7", size = 5051, upload-time = "2025-12-19T13:05:38.651Z" },
 ]
 
 [[package]]
