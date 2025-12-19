@@ -15,3 +15,6 @@ wheels/
 
 # hatch-vcs build hook
 src/proface/abaqus/preprocessor/_version.py
+
+# coverage data
+.coverage
