@@ -295,7 +295,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "h5py", specifier = ">=3.13.0" },
-    { name = "numpy", specifier = ">=2.0" },
+    { name = "numpy", specifier = ">=2.3" },
     { name = "proface-pre", specifier = ">=0.2.0" },
     { name = "suanpan-abaqus", specifier = ">=0.2.0b1,<0.3.0" },
 ]

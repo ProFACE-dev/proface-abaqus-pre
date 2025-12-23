@@ -43,24 +43,41 @@ class AbaqusTranslatorError(PreprocessorError):
 
 
 @dataclasses.dataclass
-class MeshBloc:
+class MeshBlock:
     """internal structure for caching mesh info"""
 
     incidences: npt.NDArray[NUM_CLASS]
     numbers: npt.NDArray[NUM_CLASS]
 
-    def concatenate(self, other: Self) -> None:
-        for f in (i.name for i in dataclasses.fields(self)):
-            old = getattr(self, f)
-            new = getattr(other, f)
-            setattr(self, f, np.concatenate((old, new), axis=0, casting="no"))
+    def merge(self, other: Self) -> None:
+        """merge other MeshBlock keeping element number ordering"""
 
-    # mb.incidences = np.concatenate(
-    #     (mb.incidences, elbloc["ninc"]), axis=0, casting="no"
-    # )
-    # mb.numbers = np.concatenate(
-    #     (mb.numbers, elbloc["elnum"]), axis=0, casting="no"
-    # )
+        if np.any(np.isin(other.numbers, self.numbers, assume_unique=True)):
+            msg = "'numbers' are not unique after merge"
+            raise ValueError(msg)
+
+        for f in (i.name for i in dataclasses.fields(self)):
+            cur = getattr(self, f)
+            oth = getattr(other, f)
+            try:
+                new = np.concatenate((cur, oth), axis=0, casting="no")
+            except ValueError as exc:
+                msg = (
+                    f"MeshBlock of incompatible shape at '{f}': "
+                    f"{cur.shape}, {oth.shape}"
+                )
+                raise ValueError(msg) from exc
+            setattr(self, f, new)
+
+        # enforce element numbers still strictly sorted after concatenate
+        if not np.all(self.numbers[:-1] < self.numbers[1:]):
+            arg = np.argsort(self.numbers)
+            self.incidences = self.incidences[arg]
+            self.numbers = self.numbers[arg]
+
+    @property
+    def nodes(self) -> npt.NDArray[NUM_CLASS]:
+        return np.unique(self.incidences, sorted=True)
 
 
 def main(
@@ -179,7 +196,7 @@ def _write_element(fil, h5):
     h5_elements.attrs["size"] = fil.info["elsiz"]
 
     # scan fil for element blocs
-    blocs: dict[str, MeshBloc] = {}
+    blocs: dict[str, MeshBlock] = {}
     for elbloc in fil.elm:
         # check elbloc is homogeneous
         assert (elbloc["eltyp"] == elbloc["eltyp"][0]).all()
@@ -190,7 +207,7 @@ def _write_element(fil, h5):
                 "Skipping %d elements of type %s", len(elbloc), abqlabel
             )
             continue
-        mb = MeshBloc(incidences=elbloc["ninc"], numbers=elbloc["elnum"])
+        mb = MeshBlock(incidences=elbloc["ninc"], numbers=elbloc["elnum"])
         if eltype not in blocs:
             logger.debug(
                 "Storing %d elements of type %s [topology %s]",
@@ -200,14 +217,14 @@ def _write_element(fil, h5):
             )
             blocs[eltype] = mb
         else:
-            blocs[eltype].concatenate(mb)
+            blocs[eltype].merge(mb)
 
     # save in h5
     for eltype, mb in blocs.items():
         h5_elgroup = h5_elements.create_group(eltype)
         h5_elgroup.create_dataset("incidences", data=mb.incidences)
         h5_elgroup.create_dataset("numbers", data=mb.numbers)
-        h5_elgroup.create_dataset("nodes", data=np.unique(mb.incidences))
+        h5_elgroup.create_dataset("nodes", data=mb.nodes)
 
 
 def _write_sets(fil, h5):
