@@ -2,9 +2,6 @@ version = 1
 revision = 3
 requires-python = ">=3.12"
 
-[options]
-prerelease-mode = "explicit"
-
 [[package]]
 name = "click"
 version = "8.3.0"
@@ -297,7 +294,7 @@ requires-dist = [
     { name = "h5py", specifier = ">=3.13.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "proface-pre", specifier = ">=0.2.0" },
-    { name = "suanpan-abaqus", specifier = ">=0.2.0b1,<0.3.0" },
+    { name = "suanpan-abaqus", specifier = ">=0.2.0,<0.3.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -347,14 +344,14 @@ wheels = [
 
 [[package]]
 name = "suanpan-abaqus"
-version = "0.2.0b1"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b6/b0/68b03aedb7847d60f6ea419ba08bfd60dd608af41c0eaaca301184aea68a/suanpan_abaqus-0.2.0b1.tar.gz", hash = "sha256:4f68061f675b10937e773f35b3b39e2f5789d75eb0494d011227f6e1e0ecbade", size = 43682, upload-time = "2025-11-28T17:39:09.85Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/c6/ede29013c30d6d2f4a832217aafc42231077f05be1ae6ae6535e73edebc2/suanpan_abaqus-0.2.0.tar.gz", hash = "sha256:c17ca398950cdcf193ae855444a96b4d2a65ec789fb83ffff1574e83dc421be7", size = 54724, upload-time = "2026-05-08T12:03:43.958Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/49/96/bbfb2669ed11a424c7d5b9e2d7350efde037f2e55e1d7aabed3dfb818598/suanpan_abaqus-0.2.0b1-py3-none-any.whl", hash = "sha256:9fb389901bb50942c76cbfba0f0616ef2527657a2a113086aa308e99fa0d7d8f", size = 10829, upload-time = "2025-11-28T17:39:08.65Z" },
+    { url = "https://files.pythonhosted.org/packages/28/8d/484cacff39396c0c164cc7600100aff7d2d23157fd1965a96efe02208009/suanpan_abaqus-0.2.0-py3-none-any.whl", hash = "sha256:6978c59fc6bcb1ba98c5c9c6d00aeb770dee681d74f2422c4292a1427d9313b8", size = 11696, upload-time = "2026-05-08T12:03:42.474Z" },
 ]
 
 [[package]]
