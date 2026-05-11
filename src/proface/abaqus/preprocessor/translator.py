@@ -5,12 +5,12 @@
 """Translator implementation"""
 
 import collections.abc
-import dataclasses
 import logging
 import re
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
+import attrs
 import h5py  # type: ignore[import-untyped]
 import numpy as np
 import numpy.typing as npt
@@ -37,47 +37,117 @@ RES_DTYPE = np.dtype(RES_CLASS)
 # FIXME: be more specific when suanpan has better typing support
 NUM_CLASS = np.integer
 
+# type helpers, to be made more strict when typing is implemented in suanpan
+AbqElblock = Any
+
 
 class AbaqusTranslatorError(PreprocessorError):
     pass
 
 
-@dataclasses.dataclass
+@attrs.define
 class MeshBlock:
     """internal structure for caching mesh info"""
 
-    incidences: npt.NDArray[NUM_CLASS]
-    numbers: npt.NDArray[NUM_CLASS]
+    topology: str | None
+    eltype: str
+    incidences: npt.NDArray[NUM_CLASS] = attrs.field()
+
+    @incidences.validator
+    def check_i(
+        self, _attribute: object, value: npt.NDArray[NUM_CLASS]
+    ) -> None:
+        if value.ndim != 2:  # noqa: PLR2004
+            msg = "Incidences must be 2-dimensional"
+            raise ValueError(msg)
+
+    numbers: npt.NDArray[NUM_CLASS] = attrs.field()
+
+    @numbers.validator
+    def check_n(
+        self, _attribute: object, value: npt.NDArray[NUM_CLASS]
+    ) -> None:
+        if value.ndim != 1:
+            msg = "Element numbers must be 1-dimensional"
+            raise ValueError(msg)
+        if not np.all(value[:-1] < value[1:]):
+            msg = "Element numbers must be strictly sorted"
+            raise ValueError(msg)
+        if len(value) != len(self.incidences):
+            msg = "Incidences and numbers must have the same length"
+            raise ValueError(msg)
+
+    @classmethod
+    def from_abaqus(cls, elbloc: AbqElblock) -> "MeshBlock":
+        """construct class form Abaqus elbloc"""
+
+        assert (elbloc["eltyp"] == elbloc["eltyp"][0]).all()
+        abqlabel = _label(elbloc["eltyp"][0])
+        topology = _proface_eltype(abqlabel)
+
+        return cls(
+            topology=topology,
+            eltype=abqlabel,
+            incidences=elbloc["ninc"],
+            numbers=elbloc["elnum"],
+        )
 
     def merge(self, other: Self) -> None:
         """merge other MeshBlock keeping element number ordering"""
+
+        if other.topology != self.topology:
+            msg = "Can merge only same topology"
+            raise ValueError(msg)
+
+        if other.eltype != self.eltype:
+            msg = (
+                f"Mixed element formulations for topology {self.topology} "
+                f"not supported: {self.eltype}, {other.eltype}."
+            )
+            raise AbaqusTranslatorError(msg)
+
+        if other.incidences.shape[1] != self.incidences.shape[1]:
+            msg = (
+                f"Topology error merging {self.topology}: "
+                f"{self.incidences.shape} {other.incidences.shape}"
+            )
+            raise ValueError(msg)
+
+        # runtime guard until suanpan exposes precise dtypes
+        for f in ["incidences", "numbers"]:
+            cur = getattr(self, f)
+            oth = getattr(other, f)
+            if cur.dtype != oth.dtype:
+                msg = (
+                    f"MeshBlock of incompatible dtype at '{f}': "
+                    f"{cur.dtype}, {oth.dtype}"
+                )
+                raise ValueError(msg)
 
         if np.any(np.isin(other.numbers, self.numbers, assume_unique=True)):
             msg = "'numbers' are not unique after merge"
             raise ValueError(msg)
 
-        for f in (i.name for i in dataclasses.fields(self)):
-            cur = getattr(self, f)
-            oth = getattr(other, f)
-            try:
-                new = np.concatenate((cur, oth), axis=0, casting="no")
-            except ValueError as exc:
-                msg = (
-                    f"MeshBlock of incompatible shape at '{f}': "
-                    f"{cur.shape}, {oth.shape}"
-                )
-                raise ValueError(msg) from exc
-            setattr(self, f, new)
+        incidences = np.concat(
+            (self.incidences, other.incidences), axis=0, casting="no"
+        )
+        numbers = np.concat((self.numbers, other.numbers), axis=0, casting="no")
 
         # enforce element numbers still strictly sorted after concatenate
-        if not np.all(self.numbers[:-1] < self.numbers[1:]):
-            arg = np.argsort(self.numbers)
-            self.incidences = self.incidences[arg]
-            self.numbers = self.numbers[arg]
+        if not np.all(numbers[:-1] < numbers[1:]):
+            arg = np.argsort(numbers)
+            incidences = incidences[arg]
+            numbers = numbers[arg]
+
+        self.incidences = incidences
+        self.numbers = numbers
 
     @property
     def nodes(self) -> npt.NDArray[NUM_CLASS]:
         return np.unique(self.incidences, sorted=True)
+
+    def __len__(self) -> int:
+        return len(self.numbers)
 
 
 def main(
@@ -110,8 +180,8 @@ def main(
     # run translator
     try:
         _pre(filpth=filpth, h5=h5, results=job.get("results", {}))
-    except OSError:
-        # caller should treat OSError
+    except (OSError, AbaqusTranslatorError):
+        # caller should treat these Errors
         raise
     except Exception:
         msg = "Internal Error"
@@ -198,26 +268,25 @@ def _write_element(fil, h5):
     # scan fil for element blocs
     blocs: dict[str, MeshBlock] = {}
     for elbloc in fil.elm:
-        # check elbloc is homogeneous
-        assert (elbloc["eltyp"] == elbloc["eltyp"][0]).all()
-        abqlabel = _label(elbloc["eltyp"][0])
-        eltype = _proface_eltype(abqlabel)
-        if eltype is None:
-            logger.info(
-                "Skipping %d elements of type %s", len(elbloc), abqlabel
-            )
+        mb = MeshBlock.from_abaqus(elbloc)
+        logger.debug(
+            "Got %d elements of type %s [topology %s]",
+            len(mb),
+            mb.eltype,
+            mb.topology,
+        )
+
+        if mb.topology is None:
+            logger.info("Skipping %d elements of type %s", len(mb), mb.eltype)
             continue
-        mb = MeshBlock(incidences=elbloc["ninc"], numbers=elbloc["elnum"])
-        if eltype not in blocs:
-            logger.debug(
-                "Storing %d elements of type %s [topology %s]",
-                len(elbloc),
-                abqlabel,
-                eltype,
-            )
-            blocs[eltype] = mb
+
+        topology = mb.topology
+        if topology not in blocs:
+            logger.debug("Storing MeshBlock [topology %s]", topology)
+            blocs[topology] = mb
         else:
-            blocs[eltype].merge(mb)
+            logger.debug("Merging MeshBlock [topology %s]", topology)
+            blocs[topology].merge(mb)
 
     # save in h5
     for eltype, mb in blocs.items():
