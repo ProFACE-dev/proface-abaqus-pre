@@ -23,9 +23,9 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "proface-pre>=0.2.0",
+    "proface-pre>=0.2.1",
     "h5py>=3.13.0",
-    "numpy>=2.3",
+    "numpy>=2.3.3",
     "suanpan-abaqus>=0.2.0, <0.3.0",
 ]
 license = "MIT"
@@ -44,9 +44,9 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "coverage>=7.11.3",
-    "mypy>=1.18.2",
-    "pytest>=9.0.2",
+    "coverage>=7.14.0",
+    "mypy>=2.0.0",
+    "pytest>=9.0.3",
 ]
 
 #
@@ -87,6 +87,7 @@ known-first-party = ["proface"]
 #
 [tool.uv]
 prerelease = "if-necessary-or-explicit"
+resolution = "lowest-direct"
 
 #
 # mypy
