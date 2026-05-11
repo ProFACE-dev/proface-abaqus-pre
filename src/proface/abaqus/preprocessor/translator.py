@@ -289,7 +289,8 @@ def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901, PLR0912
         abqeltype = _label(abqeltype)
         eltype = _proface_eltype(abqeltype)
         if eltype is None:
-            logger.debug("Skipping %s elbloc", eltype)
+            logger.debug("Skipping %s elbloc", abqeltype)
+            continue
 
         # check block location
         loc = data["loc"][0]
