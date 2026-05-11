@@ -20,6 +20,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: Implementation :: CPython",
+  "Typing :: Typed",
 ]
 requires-python = ">=3.12"
 dependencies = [
@@ -95,3 +96,14 @@ resolution = "lowest-direct"
 #
 [tool.mypy]
 check_untyped_defs = true
+explicit_package_bases = true
+namespace_packages = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
+warn_return_any = true
+warn_unused_configs = true
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_calls = false
+disallow_untyped_defs = false

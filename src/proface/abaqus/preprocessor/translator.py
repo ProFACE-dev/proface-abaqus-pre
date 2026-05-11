@@ -4,7 +4,6 @@
 
 """Translator implementation"""
 
-import collections.abc
 import logging
 import re
 from pathlib import Path
@@ -24,21 +23,24 @@ logger = logging.getLogger(__name__)
 
 
 # translation from Abaqus result codes to ProFACE ids
-ABQ_VAR = {"R11": "S", "R401": "SP", "R76": "IVOL", "R8": "COORD"}
+ABQ_VAR: dict[str, str] = {
+    "R11": "S",
+    "R401": "SP",
+    "R76": "IVOL",
+    "R8": "COORD",
+}
 # translation from Abaqus location codes to ProFACE ids
-ABQ_LOC = {0: "integration_point", 4: "nodal_averaged"}
+ABQ_LOC: dict[int, str] = {0: "integration_point", 4: "nodal_averaged"}
 
 # function for computing results path in h5
 _h5_path = "{var:s}/{loc:s}/{eltype:s}".format
 
-# save results in single precision
-RES_CLASS = np.float32
-RES_DTYPE = np.dtype(RES_CLASS)
-# FIXME: be more specific when suanpan has better typing support
-NUM_CLASS = np.integer
+# concrete scalar type for saving FEA results
+RESULTS_TYPE: type[np.floating[Any]] = np.float32
 
 # type helpers, to be made more strict when typing is implemented in suanpan
-AbqElblock = Any
+type AbqElblock = Any
+type INT_TYPE = np.integer
 
 
 class AbaqusTranslatorError(PreprocessorError):
@@ -51,22 +53,18 @@ class MeshBlock:
 
     topology: str | None
     eltype: str
-    incidences: npt.NDArray[NUM_CLASS] = attrs.field()
+    incidences: npt.NDArray[INT_TYPE] = attrs.field()
 
     @incidences.validator
-    def check_i(
-        self, _attribute: object, value: npt.NDArray[NUM_CLASS]
-    ) -> None:
+    def check_i(self, _attribute: object, value: npt.NDArray[INT_TYPE]) -> None:
         if value.ndim != 2:  # noqa: PLR2004
             msg = "Incidences must be 2-dimensional"
             raise ValueError(msg)
 
-    numbers: npt.NDArray[NUM_CLASS] = attrs.field()
+    numbers: npt.NDArray[INT_TYPE] = attrs.field()
 
     @numbers.validator
-    def check_n(
-        self, _attribute: object, value: npt.NDArray[NUM_CLASS]
-    ) -> None:
+    def check_n(self, _attribute: object, value: npt.NDArray[INT_TYPE]) -> None:
         if value.ndim != 1:
             msg = "Element numbers must be 1-dimensional"
             raise ValueError(msg)
@@ -143,21 +141,19 @@ class MeshBlock:
         self.numbers = numbers
 
     @property
-    def nodes(self) -> npt.NDArray[NUM_CLASS]:
+    def nodes(self) -> npt.NDArray[INT_TYPE]:
         return np.unique(self.incidences, sorted=True)
 
     def __len__(self) -> int:
         return len(self.numbers)
 
 
-def main(
-    *, job: collections.abc.Mapping, job_path: Path, h5: h5py.Group
-) -> None:
+def main(*, job: dict[str, Any], job_path: Path, h5: h5py.Group) -> None:
     """main entrypoint for abaqus preprocessor"""
 
     # runtime type checking
-    if not isinstance(job, collections.abc.Mapping):
-        msg = "'job' must be a mapping"
+    if not isinstance(job, dict):
+        msg = "'job' must be a dict"
         raise TypeError(msg)
     if not isinstance(job_path, Path):
         msg = "'job_path' must be a pathlib.Path"
@@ -190,7 +186,7 @@ def main(
     logger.info("\U0001f3c1 END Abaqus to ProFACE translator")  # 🏁
 
 
-def _pre(filpth, h5: h5py.File, results):
+def _pre(filpth: Path, h5: h5py.Group, results: dict[str, Any]) -> None:
     """Abaqus translator"""
 
     logger.info("reading %s", filpth.resolve().as_uri())
@@ -225,7 +221,7 @@ def _pre(filpth, h5: h5py.File, results):
         )
 
 
-def _write_meta(fil, h5):
+def _write_meta(fil: Any, h5: h5py.Group) -> None:
     #
     # metadata
     #
@@ -247,7 +243,7 @@ def _write_meta(fil, h5):
     h5.attrs["title"] = _label(fil.heading)
 
 
-def _write_nodal(fil, h5):
+def _write_nodal(fil: Any, h5: h5py.Group) -> None:
     #
     # nodal data
     #
@@ -257,7 +253,7 @@ def _write_nodal(fil, h5):
     h5_nodes.create_dataset("numbers", data=fil.coord["nnum"])
 
 
-def _write_element(fil, h5):
+def _write_element(fil: Any, h5: h5py.Group) -> None:
     #
     # element data
     #
@@ -296,7 +292,7 @@ def _write_element(fil, h5):
         h5_elgroup.create_dataset("nodes", data=mb.nodes)
 
 
-def _write_sets(fil, h5):
+def _write_sets(fil: Any, h5: h5py.Group) -> None:
     #
     # sets
     #
@@ -311,7 +307,14 @@ def _write_sets(fil, h5):
         h5_sets_element.create_dataset(kh, data=elset)
 
 
-def _write_results(fil, h5, h5_res, name: str, step: int, inc: int) -> None:  # noqa: PLR0913
+def _write_results(  # noqa: PLR0913
+    fil: Any,
+    h5: h5py.Group,
+    h5_res: h5py.Group,
+    name: str,
+    step: int,
+    inc: int,
+) -> None:
     #
     # results
     #
@@ -336,7 +339,9 @@ def _write_results(fil, h5, h5_res, name: str, step: int, inc: int) -> None:  # 
     _write_step_output_blocks(fil, h5, h5_k, i)
 
 
-def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901, PLR0912
+def _write_step_output_blocks(  # noqa: C901, PLR0912
+    fil: Any, h5: h5py.Group, h5_k: h5py.Group, i: int
+) -> None:
     for data_block in fil.get_step(i):
         flag, elset, abqeltype, data = (
             data_block.flag,
@@ -400,7 +405,7 @@ def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901, PLR0912
             if name not in ABQ_VAR:
                 logger.warning("Unexpected results code %s", name)
                 continue
-            hdata = data[name].astype(RES_DTYPE)
+            hdata = data[name].astype(RESULTS_TYPE)
             *_, n_dim = hdata.shape
             assert tuple(_) == data.shape
             if n_dim == 1:
@@ -435,7 +440,7 @@ def _proface_eltype(abq: str) -> str | None:
     return mo["type"]
 
 
-def _find_step_inc(stepdata, step, inc) -> int:
+def _find_step_inc(stepdata: Any, step: int, inc: int) -> int:
     """search for requested step/increment"""
 
     if len(stepdata) == 0:
@@ -461,14 +466,14 @@ def _find_step_inc(stepdata, step, inc) -> int:
 
     assert stepdata.ndim == 1
     (i,) = np.nonzero((stepdata["step"] == step) & (stepdata["incr"] == inc))
-    assert np.shape(i) == (1,), f"Multiple step blocks found: {i}"
+    assert i.shape == (1,), f"Multiple step blocks found: {i}"
 
     logger.debug("Found: Step %d, increment %d at position %s", step, inc, i)
     assert stepdata[i][["step", "incr"]].item() == (step, inc)
     return i.item()
 
 
-def _guess_nr_ip(data):
+def _guess_nr_ip(data: Any) -> int:
     """heuristics to find the number of integration points
     for a loc 0 (integration points) record"""
 

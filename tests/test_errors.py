@@ -4,8 +4,9 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
-import h5py
+import h5py  # type: ignore[import-untyped]
 import numpy as np
 import pytest
 
@@ -53,11 +54,11 @@ def h5_pth():
 
 def test_main_args_types(h5_empty, h5_pth):
     with pytest.raises(TypeError) as excinfo:
-        translator.main(job="{}", job_path=h5_pth, h5=h5_empty)
+        translator.main(job=cast("Any", "{}"), job_path=h5_pth, h5=h5_empty)
     assert excinfo.type is TypeError
 
     with pytest.raises(TypeError) as excinfo:
-        translator.main(job={}, job_path="h5_pth", h5=h5_empty)
+        translator.main(job={}, job_path=cast("Any", "h5_pth"), h5=h5_empty)
     assert excinfo.type is TypeError
 
     with pytest.raises(TypeError) as excinfo:
