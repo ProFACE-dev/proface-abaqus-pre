@@ -10,7 +10,7 @@ readme = "README.md"
 authors = [
     { name = "Stefano Miccoli", email = "stefano.miccoli@polimi.it" }
 ]
-mantainers = [
+maintainers = [
     { name = "ProFACE developers", email = "proface@polimi.it" }
 ]
 classifiers = [
