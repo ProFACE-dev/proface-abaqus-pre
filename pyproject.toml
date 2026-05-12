@@ -20,13 +20,15 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: Implementation :: CPython",
+  "Typing :: Typed",
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "proface-pre>=0.2.0",
+    "proface-pre>=0.2.1",
     "h5py>=3.13.0",
-    "numpy>=2.0",
+    "numpy>=2.3.3",
     "suanpan-abaqus>=0.2.0, <0.3.0",
+    "attrs>=26.1.0",
 ]
 license = "MIT"
 
@@ -44,9 +46,9 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "coverage>=7.11.3",
-    "mypy>=1.18.2",
-    "pytest>=9.0.2",
+    "coverage>=7.14.0",
+    "mypy>=2.0.0",
+    "pytest>=9.0.3",
 ]
 
 #
@@ -87,9 +89,21 @@ known-first-party = ["proface"]
 #
 [tool.uv]
 prerelease = "if-necessary-or-explicit"
+resolution = "lowest-direct"
 
 #
 # mypy
 #
 [tool.mypy]
 check_untyped_defs = true
+explicit_package_bases = true
+namespace_packages = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
+warn_return_any = true
+warn_unused_configs = true
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_calls = false
+disallow_untyped_defs = false

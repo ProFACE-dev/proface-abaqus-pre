@@ -4,12 +4,15 @@
 
 """Translator implementation"""
 
-import collections.abc
 import logging
+import re
 from pathlib import Path
+from typing import Any, Self
 
+import attrs
 import h5py  # type: ignore[import-untyped]
 import numpy as np
+import numpy.typing as npt
 from suanpan.abqfil import AbqFil  # type: ignore[import-untyped]
 
 from proface.preprocessor import PreprocessorError
@@ -20,29 +23,137 @@ logger = logging.getLogger(__name__)
 
 
 # translation from Abaqus result codes to ProFACE ids
-ABQ_VAR = {"R11": "S", "R401": "SP", "R76": "IVOL", "R8": "COORD"}
+ABQ_VAR: dict[str, str] = {
+    "R11": "S",
+    "R401": "SP",
+    "R76": "IVOL",
+    "R8": "COORD",
+}
 # translation from Abaqus location codes to ProFACE ids
-ABQ_LOC = {0: "integration_point", 4: "nodal_averaged"}
+ABQ_LOC: dict[int, str] = {0: "integration_point", 4: "nodal_averaged"}
 
 # function for computing results path in h5
 _h5_path = "{var:s}/{loc:s}/{eltype:s}".format
 
-# save results in single precision
-RES_DTYPE = np.dtype("float32")
+# concrete scalar type for saving FEA results
+RESULTS_TYPE: type[np.floating[Any]] = np.float32
+
+# type helpers, to be made more strict when typing is implemented in suanpan
+type AbqElblock = Any
+type INT_TYPE = np.integer
 
 
 class AbaqusTranslatorError(PreprocessorError):
     pass
 
 
-def main(
-    *, job: collections.abc.Mapping, job_path: Path, h5: h5py.Group
-) -> None:
+@attrs.define
+class MeshBlock:
+    """internal structure for caching mesh info"""
+
+    topology: str | None
+    eltype: str
+    incidences: npt.NDArray[INT_TYPE] = attrs.field()
+
+    @incidences.validator
+    def check_i(self, _attribute: object, value: npt.NDArray[INT_TYPE]) -> None:
+        if value.ndim != 2:  # noqa: PLR2004
+            msg = "Incidences must be 2-dimensional"
+            raise ValueError(msg)
+
+    numbers: npt.NDArray[INT_TYPE] = attrs.field()
+
+    @numbers.validator
+    def check_n(self, _attribute: object, value: npt.NDArray[INT_TYPE]) -> None:
+        if value.ndim != 1:
+            msg = "Element numbers must be 1-dimensional"
+            raise ValueError(msg)
+        if not np.all(value[:-1] < value[1:]):
+            msg = "Element numbers must be strictly sorted"
+            raise ValueError(msg)
+        if len(value) != len(self.incidences):
+            msg = "Incidences and numbers must have the same length"
+            raise ValueError(msg)
+
+    @classmethod
+    def from_abaqus(cls, elbloc: AbqElblock) -> "MeshBlock":
+        """construct class form Abaqus elbloc"""
+
+        assert (elbloc["eltyp"] == elbloc["eltyp"][0]).all()
+        abqlabel = _label(elbloc["eltyp"][0])
+        topology = _proface_eltype(abqlabel)
+
+        return cls(
+            topology=topology,
+            eltype=abqlabel,
+            incidences=elbloc["ninc"],
+            numbers=elbloc["elnum"],
+        )
+
+    def merge(self, other: Self) -> None:
+        """merge other MeshBlock keeping element number ordering"""
+
+        if other.topology != self.topology:
+            msg = "Can merge only same topology"
+            raise ValueError(msg)
+
+        if other.eltype != self.eltype:
+            msg = (
+                f"Mixed element formulations for topology {self.topology} "
+                f"not supported: {self.eltype}, {other.eltype}."
+            )
+            raise AbaqusTranslatorError(msg)
+
+        if other.incidences.shape[1] != self.incidences.shape[1]:
+            msg = (
+                f"Topology error merging {self.topology}: "
+                f"{self.incidences.shape} {other.incidences.shape}"
+            )
+            raise ValueError(msg)
+
+        # runtime guard until suanpan exposes precise dtypes
+        for f in ["incidences", "numbers"]:
+            cur = getattr(self, f)
+            oth = getattr(other, f)
+            if cur.dtype != oth.dtype:
+                msg = (
+                    f"MeshBlock of incompatible dtype at '{f}': "
+                    f"{cur.dtype}, {oth.dtype}"
+                )
+                raise ValueError(msg)
+
+        if np.any(np.isin(other.numbers, self.numbers, assume_unique=True)):
+            msg = "'numbers' are not unique after merge"
+            raise ValueError(msg)
+
+        incidences = np.concat(
+            (self.incidences, other.incidences), axis=0, casting="no"
+        )
+        numbers = np.concat((self.numbers, other.numbers), axis=0, casting="no")
+
+        # enforce element numbers still strictly sorted after concatenate
+        if not np.all(numbers[:-1] < numbers[1:]):
+            arg = np.argsort(numbers)
+            incidences = incidences[arg]
+            numbers = numbers[arg]
+
+        self.incidences = incidences
+        self.numbers = numbers
+
+    @property
+    def nodes(self) -> npt.NDArray[INT_TYPE]:
+        return np.unique(self.incidences, sorted=True)
+
+    def __len__(self) -> int:
+        return len(self.numbers)
+
+
+def main(*, job: dict[str, Any], job_path: Path, h5: h5py.Group) -> None:
     """main entrypoint for abaqus preprocessor"""
 
     # runtime type checking
-    if not isinstance(job, collections.abc.Mapping):
-        msg = "'job' must be a mapping"
+    if not isinstance(job, dict):
+        msg = "'job' must be a dict"
         raise TypeError(msg)
     if not isinstance(job_path, Path):
         msg = "'job_path' must be a pathlib.Path"
@@ -65,8 +176,8 @@ def main(
     # run translator
     try:
         _pre(filpth=filpth, h5=h5, results=job.get("results", {}))
-    except OSError:
-        # caller should treat OSError
+    except (OSError, AbaqusTranslatorError):
+        # caller should treat these Errors
         raise
     except Exception:
         msg = "Internal Error"
@@ -75,7 +186,7 @@ def main(
     logger.info("\U0001f3c1 END Abaqus to ProFACE translator")  # 🏁
 
 
-def _pre(filpth, h5: h5py.File, results):
+def _pre(filpth: Path, h5: h5py.Group, results: dict[str, Any]) -> None:
     """Abaqus translator"""
 
     logger.info("reading %s", filpth.resolve().as_uri())
@@ -110,7 +221,7 @@ def _pre(filpth, h5: h5py.File, results):
         )
 
 
-def _write_meta(fil, h5):
+def _write_meta(fil: Any, h5: h5py.Group) -> None:
     #
     # metadata
     #
@@ -132,7 +243,7 @@ def _write_meta(fil, h5):
     h5.attrs["title"] = _label(fil.heading)
 
 
-def _write_nodal(fil, h5):
+def _write_nodal(fil: Any, h5: h5py.Group) -> None:
     #
     # nodal data
     #
@@ -142,34 +253,46 @@ def _write_nodal(fil, h5):
     h5_nodes.create_dataset("numbers", data=fil.coord["nnum"])
 
 
-def _write_element(fil, h5):
+def _write_element(fil: Any, h5: h5py.Group) -> None:
     #
     # element data
     #
     h5_elements = h5.create_group("elements")
     h5_elements.attrs["number"] = fil.info["nelm"]
     h5_elements.attrs["size"] = fil.info["elsiz"]
-    for elbloc in fil.elm:
-        assert (elbloc["eltyp"] == elbloc["eltyp"][0]).all()
-        eltype = _safe_label(elbloc["eltyp"][0])
-        if eltype in h5_elements:
-            label_m = _mangle_element_label(eltype, h5_elements.keys())
-            logger.warning(
-                "Mapping %s \N{RIGHTWARDS ARROW FROM BAR} %s",
-                eltype,
-                label_m,
-            )
-            eltype = label_m
-        h5_elgroup = h5_elements.create_group(eltype)
-        h5_elgroup.create_dataset("incidences", data=elbloc["ninc"])
-        h5_elgroup.create_dataset("numbers", data=elbloc["elnum"])
 
-        h5_elgroup.create_dataset(
-            "nodes", data=np.unique(h5_elgroup["incidences"])
+    # scan fil for element blocs
+    blocs: dict[str, MeshBlock] = {}
+    for elbloc in fil.elm:
+        mb = MeshBlock.from_abaqus(elbloc)
+        logger.debug(
+            "Got %d elements of type %s [topology %s]",
+            len(mb),
+            mb.eltype,
+            mb.topology,
         )
 
+        if mb.topology is None:
+            logger.info("Skipping %d elements of type %s", len(mb), mb.eltype)
+            continue
 
-def _write_sets(fil, h5):
+        topology = mb.topology
+        if topology not in blocs:
+            logger.debug("Storing MeshBlock [topology %s]", topology)
+            blocs[topology] = mb
+        else:
+            logger.debug("Merging MeshBlock [topology %s]", topology)
+            blocs[topology].merge(mb)
+
+    # save in h5
+    for eltype, mb in blocs.items():
+        h5_elgroup = h5_elements.create_group(eltype)
+        h5_elgroup.create_dataset("incidences", data=mb.incidences)
+        h5_elgroup.create_dataset("numbers", data=mb.numbers)
+        h5_elgroup.create_dataset("nodes", data=mb.nodes)
+
+
+def _write_sets(fil: Any, h5: h5py.Group) -> None:
     #
     # sets
     #
@@ -184,7 +307,14 @@ def _write_sets(fil, h5):
         h5_sets_element.create_dataset(kh, data=elset)
 
 
-def _write_results(fil, h5, h5_res, name: str, step: int, inc: int) -> None:  # noqa: PLR0913
+def _write_results(  # noqa: PLR0913
+    fil: Any,
+    h5: h5py.Group,
+    h5_res: h5py.Group,
+    name: str,
+    step: int,
+    inc: int,
+) -> None:
     #
     # results
     #
@@ -209,9 +339,11 @@ def _write_results(fil, h5, h5_res, name: str, step: int, inc: int) -> None:  # 
     _write_step_output_blocks(fil, h5, h5_k, i)
 
 
-def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901, PLR0912
+def _write_step_output_blocks(  # noqa: C901, PLR0912
+    fil: Any, h5: h5py.Group, h5_k: h5py.Group, i: int
+) -> None:
     for data_block in fil.get_step(i):
-        flag, elset, eltype, data = (
+        flag, elset, abqeltype, data = (
             data_block.flag,
             data_block.set,
             data_block.eltype,
@@ -228,9 +360,10 @@ def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901, PLR0912
             continue
 
         # check block element type
-        eltype = _safe_label(eltype)
-        if not eltype.startswith("C3D"):
-            logger.warning("Results for element %s ignored", eltype)
+        abqeltype = _label(abqeltype)
+        eltype = _proface_eltype(abqeltype)
+        if eltype is None:
+            logger.debug("Skipping %s elbloc", abqeltype)
             continue
 
         # check block location
@@ -272,7 +405,7 @@ def _write_step_output_blocks(fil, h5, h5_k, i):  # noqa: C901, PLR0912
             if name not in ABQ_VAR:
                 logger.warning("Unexpected results code %s", name)
                 continue
-            hdata = data[name].astype(RES_DTYPE)
+            hdata = data[name].astype(RESULTS_TYPE)
             *_, n_dim = hdata.shape
             assert tuple(_) == data.shape
             if n_dim == 1:
@@ -296,18 +429,18 @@ def _safe_label(lab: bytes) -> str:
     return slabel.replace("/", "|")
 
 
-def _mangle_element_label(label: str, groups) -> str:
-    assert label in groups
-    i = 1
-    for s in groups:
-        if s.startswith(f"{label:s}@"):
-            i += 1
-    mangled = f"{label:2}@{i:d}"
-    assert mangled not in groups
-    return mangled
+# regex parse C3D(.*) abaqus element type codes
+_c3dre = re.compile(r"(?P<type>C3D(?P<nodes>\d+))(?P<subtype>[A-Z]*)")
 
 
-def _find_step_inc(stepdata, step, inc) -> int:
+def _proface_eltype(abq: str) -> str | None:
+    mo = _c3dre.fullmatch(abq)
+    if mo is None:
+        return None
+    return mo["type"]
+
+
+def _find_step_inc(stepdata: Any, step: int, inc: int) -> int:
     """search for requested step/increment"""
 
     if len(stepdata) == 0:
@@ -333,14 +466,14 @@ def _find_step_inc(stepdata, step, inc) -> int:
 
     assert stepdata.ndim == 1
     (i,) = np.nonzero((stepdata["step"] == step) & (stepdata["incr"] == inc))
-    assert np.shape(i) == (1,), f"Multiple step blocks found: {i}"
+    assert i.shape == (1,), f"Multiple step blocks found: {i}"
 
     logger.debug("Found: Step %d, increment %d at position %s", step, inc, i)
     assert stepdata[i][["step", "incr"]].item() == (step, inc)
     return i.item()
 
 
-def _guess_nr_ip(data):
+def _guess_nr_ip(data: Any) -> int:
     """heuristics to find the number of integration points
     for a loc 0 (integration points) record"""
 
