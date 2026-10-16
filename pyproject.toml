@@ -89,7 +89,7 @@ known-first-party = ["proface"]
 # uv
 #
 [tool.uv]
-prerelease = "if-necessary-or-explicit"
+prerelease = "if-necessary"
 resolution = "lowest-direct"
 
 #
