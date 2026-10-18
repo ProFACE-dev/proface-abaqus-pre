@@ -91,7 +91,7 @@ def test_mixed_formulations_same_topology_error(h5_empty):
         translator.AbaqusTranslatorError,
         match=r"^Mixed element formulations",
     ):
-        translator._write_element(fil, h5_empty)  # noqa: SLF001
+        translator._write_element(fil=fil, h5=h5_empty)  # noqa: SLF001
 
 
 def test_meshblock_merge_different_topology_error():
@@ -160,7 +160,7 @@ def test_same_formulation_same_topology_merge(h5_empty):
         ],
     )
 
-    translator._write_element(fil, h5_empty)  # noqa: SLF001
+    translator._write_element(fil=fil, h5=h5_empty)  # noqa: SLF001
 
     np.testing.assert_array_equal(
         h5_empty["elements"]["C3D8"]["numbers"][:],

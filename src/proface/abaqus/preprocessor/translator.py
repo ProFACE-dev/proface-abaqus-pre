@@ -186,7 +186,7 @@ def main(*, job: dict[str, Any], job_path: Path, h5: h5py.Group) -> None:
     logger.info("\U0001f3c1 END Abaqus to ProFACE translator")  # 🏁
 
 
-def _pre(filpth: Path, h5: h5py.Group, results: dict[str, Any]) -> None:
+def _pre(*, filpth: Path, h5: h5py.Group, results: dict[str, Any]) -> None:
     """Abaqus translator"""
 
     logger.info("reading %s", filpth.resolve().as_uri())
@@ -221,7 +221,7 @@ def _pre(filpth: Path, h5: h5py.Group, results: dict[str, Any]) -> None:
         )
 
 
-def _write_meta(fil: Any, h5: h5py.Group) -> None:
+def _write_meta(*, fil: Any, h5: h5py.Group) -> None:
     #
     # metadata
     #
@@ -243,7 +243,7 @@ def _write_meta(fil: Any, h5: h5py.Group) -> None:
     h5.attrs["title"] = _label(fil.heading)
 
 
-def _write_nodal(fil: Any, h5: h5py.Group) -> None:
+def _write_nodal(*, fil: Any, h5: h5py.Group) -> None:
     #
     # nodal data
     #
@@ -253,7 +253,7 @@ def _write_nodal(fil: Any, h5: h5py.Group) -> None:
     h5_nodes.create_dataset("numbers", data=fil.coord["nnum"])
 
 
-def _write_element(fil: Any, h5: h5py.Group) -> None:
+def _write_element(*, fil: Any, h5: h5py.Group) -> None:
     #
     # element data
     #
@@ -292,7 +292,7 @@ def _write_element(fil: Any, h5: h5py.Group) -> None:
         h5_elgroup.create_dataset("nodes", data=mb.nodes)
 
 
-def _write_sets(fil: Any, h5: h5py.Group) -> None:
+def _write_sets(*, fil: Any, h5: h5py.Group) -> None:
     #
     # sets
     #
@@ -308,6 +308,7 @@ def _write_sets(fil: Any, h5: h5py.Group) -> None:
 
 
 def _write_results(  # noqa: PLR0913
+    *,
     fil: Any,
     h5: h5py.Group,
     h5_res: h5py.Group,
@@ -336,11 +337,11 @@ def _write_results(  # noqa: PLR0913
     h5_k.attrs["increment"] = fil.step[i]["incr"]
     h5_k.attrs["time"] = fil.step[i]["ttime"]
 
-    _write_step_output_blocks(fil, h5, h5_k, i)
+    _write_step_output_blocks(fil=fil, h5=h5, h5_k=h5_k, i=i)
 
 
 def _write_step_output_blocks(  # noqa: C901, PLR0912
-    fil: Any, h5: h5py.Group, h5_k: h5py.Group, i: int
+    *, fil: Any, h5: h5py.Group, h5_k: h5py.Group, i: int
 ) -> None:
     for data_block in fil.get_step(i):
         flag, elset, abqeltype, data = (
