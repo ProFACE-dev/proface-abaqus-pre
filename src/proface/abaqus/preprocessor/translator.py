@@ -189,10 +189,8 @@ def main(*, job: dict[str, Any], job_path: Path, h5: h5py.Group) -> None:
 def _pre(*, filpth: Path, h5: h5py.Group, results: dict[str, Any]) -> None:
     """Abaqus translator"""
 
-    logger.info("reading %s", filpth.resolve().as_uri())
-    logger.info("writing %s", Path(h5.filename).resolve().as_uri())
-
     fil = AbqFil(filpth)
+    logger.info("results %s", filpth.resolve().as_uri())
 
     _write_meta(fil=fil, h5=h5)
     _write_nodal(fil=fil, h5=h5)
