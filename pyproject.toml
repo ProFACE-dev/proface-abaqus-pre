@@ -24,7 +24,7 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "proface-pre>=0.2.1",
+    "proface-pre>=0.3.0",
     "h5py>=3.13.0",
     "numpy>=2.3.3",
     "suanpan-abaqus>=0.2.0, <0.3.0",
@@ -46,10 +46,9 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "coverage>=7.14.0",
-    "mypy>=2.0.0",
-    "pytest>=9.0.3",
-    "ruff>=0.15.12",
+    "coverage>=7.16.2",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
 ]
 
 #
