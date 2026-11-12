@@ -409,7 +409,7 @@ def _write_step_output_blocks(  # noqa: C901, PLR0912
             assert tuple(_) == data.shape
             if n_dim == 1:
                 # squeeze sigleton last dimension
-                hdata = hdata.reshape(hdata.shape[:-1])
+                hdata = np.squeeze(hdata, axis=-1)
             dset = h5_k.create_dataset(
                 _h5_path(var=ABQ_VAR[name], loc=ABQ_LOC[loc], eltype=eltype),
                 data=hdata,
