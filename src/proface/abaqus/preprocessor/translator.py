@@ -374,22 +374,38 @@ def _write_step_output_blocks(  # noqa: C901, PLR0912
                 nr_ip = _guess_nr_ip(data)
                 data = data.reshape(-1, nr_ip)
                 # data["num"] is elnum across columns
-                if len(data["num"]) != len(
-                    h5["elements"][eltype]["numbers"]
-                ) or np.any(
+                if len(data["num"]) != len(h5["elements"][eltype]["numbers"]):
+                    msg = (
+                        f"Inconsistent records for {eltype}: "
+                        "results cardinality different "
+                        "with respect to mesh definition: "
+                        f"{len(data['num'])} != "
+                        f"{len(h5['elements'][eltype]['numbers'])}"
+                    )
+                    raise ValueError(msg)
+                if np.any(
                     data["num"]
                     != np.expand_dims(h5["elements"][eltype]["numbers"], -1)
                 ):
                     msg = (
                         f"Inconsistent records for {eltype}: "
-                        "results cardinality/numbering different "
+                        "results numbering different "
                         "with respect to mesh definition"
                     )
                     raise ValueError(msg)
                 # data["ipnum"] is 1..nr_ip across rows
                 assert np.all(data["ipnum"] == 1 + np.arange(nr_ip))
             case "nodal_averaged":
-                if not np.all(data["num"] == h5["elements"][eltype]["nodes"]):
+                if len(data["num"]) != len(h5["elements"][eltype]["nodes"]):
+                    msg = (
+                        f"Inconsistent records for {eltype}: "
+                        "nodal averaged results cardinality different "
+                        "with respect to mesh definition: "
+                        f"{len(data['num'])} != "
+                        f"{len(h5['elements'][eltype]['nodes'])}"
+                    )
+                    raise ValueError(msg)
+                if np.any(data["num"] != h5["elements"][eltype]["nodes"]):
                     msg = f"Inconsistent records for {eltype}: node numbers"
                     raise ValueError(msg)
                 assert (data["ipnum"] == 0).all()

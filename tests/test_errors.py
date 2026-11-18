@@ -17,6 +17,7 @@ ELBLOC_DTYPE = [
     ("elnum", np.int64),
     ("ninc", np.int64, (8,)),
 ]
+NODAL_AVERAGED = 4
 
 
 def _elbloc(eltype, elnum, nodes):
@@ -170,3 +171,80 @@ def test_same_formulation_same_topology_merge(h5_empty):
         h5_empty["elements"]["C3D8"]["incidences"][:],
         [np.arange(1, 9), np.arange(9, 17)],
     )
+
+
+def _output_block(numbers, loc, nr_ip):
+    data = np.zeros(
+        len(numbers) * nr_ip,
+        dtype=[
+            ("num", np.int64),
+            ("loc", np.int64),
+            ("ipnum", np.int64),
+            ("R76", np.float64, (1,)),
+        ],
+    )
+    data["num"] = np.repeat(numbers, nr_ip)
+    data["loc"] = loc
+    if loc == 0:
+        data["ipnum"] = np.tile(np.arange(1, nr_ip + 1), len(numbers))
+    data["R76"][:, 0] = np.arange(len(data)) + 0.5
+    return SimpleNamespace(flag=0, set=b"", eltype=b"C3D8", data=data)
+
+
+@pytest.mark.parametrize(
+    ("loc", "nr_ip"),
+    [(0, 1), (0, 8), (NODAL_AVERAGED, 1)],
+    ids=["single_ip", "multiple_ips", "nodal_averaged"],
+)
+@pytest.mark.parametrize(
+    ("mesh_numbers", "result_numbers", "error"),
+    [
+        ([1, 2, 3], [1, 2], "cardinality"),
+        ([1, 2], [1, 2, 3], "cardinality"),
+        ([1, 2], [1], "cardinality"),
+        ([1], [1, 2], "cardinality"),
+        ([1, 2], [1, 3], "numbering"),
+        ([1, 2], [2, 1], "numbering"),
+        ([1], [2], "numbering"),
+        ([1, 2], [1, 2], None),
+        ([1], [1], None),
+    ],
+)
+def test_output_record_consistency(  # noqa: PLR0913 - fixture and parametrized inputs
+    *, h5_empty, loc, nr_ip, mesh_numbers, result_numbers, error
+):
+    mesh = h5_empty.create_group("elements/C3D8")
+    mesh.create_dataset("numbers" if loc == 0 else "nodes", data=mesh_numbers)
+    output = h5_empty.create_group("results")
+    block = _output_block(result_numbers, loc, nr_ip)
+    fil = SimpleNamespace(get_step=lambda _i: [block])
+
+    if error is not None:
+        if loc == NODAL_AVERAGED and error == "numbering":
+            message = "Inconsistent records for C3D8: node numbers"
+        else:
+            prefix = "nodal averaged " if loc == NODAL_AVERAGED else ""
+            message = (
+                f"Inconsistent records for C3D8: {prefix}results {error} "
+                "different with respect to mesh definition"
+            )
+            if error == "cardinality":
+                message += f": {len(result_numbers)} != {len(mesh_numbers)}"
+        # The full message is checked for exact equality below.
+        with pytest.raises(ValueError) as excinfo:  # noqa: PT011
+            translator._write_step_output_blocks(  # noqa: SLF001
+                fil=fil, h5=h5_empty, h5_k=output, i=0
+            )
+        assert str(excinfo.value) == message
+        assert len(output) == 0
+    else:
+        translator._write_step_output_blocks(  # noqa: SLF001
+            fil=fil, h5=h5_empty, h5_k=output, i=0
+        )
+        location = "integration_point" if loc == 0 else "nodal_averaged"
+        expected = block.data["R76"][:, 0]
+        if loc == 0:
+            expected = expected.reshape(len(result_numbers), nr_ip)
+        np.testing.assert_array_equal(
+            output[f"IVOL/{location}/C3D8"][:], expected
+        )
