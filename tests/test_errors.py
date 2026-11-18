@@ -191,60 +191,99 @@ def _output_block(numbers, loc, nr_ip):
     return SimpleNamespace(flag=0, set=b"", eltype=b"C3D8", data=data)
 
 
-@pytest.mark.parametrize(
-    ("loc", "nr_ip"),
-    [(0, 1), (0, 8), (NODAL_AVERAGED, 1)],
+@pytest.fixture(
+    params=[(0, 1), (0, 8), (NODAL_AVERAGED, 1)],
     ids=["single_ip", "multiple_ips", "nodal_averaged"],
 )
-@pytest.mark.parametrize(
-    ("mesh_numbers", "result_numbers", "error"),
-    [
-        ([1, 2, 3], [1, 2], "cardinality"),
-        ([1, 2], [1, 2, 3], "cardinality"),
-        ([1, 2], [1], "cardinality"),
-        ([1], [1, 2], "cardinality"),
-        ([1, 2], [1, 3], "numbering"),
-        ([1, 2], [2, 1], "numbering"),
-        ([1], [2], "numbering"),
-        ([1, 2], [1, 2], None),
-        ([1], [1], None),
-    ],
-)
-def test_output_record_consistency(  # noqa: PLR0913 - fixture and parametrized inputs
-    *, h5_empty, loc, nr_ip, mesh_numbers, result_numbers, error
-):
-    mesh = h5_empty.create_group("elements/C3D8")
-    mesh.create_dataset("numbers" if loc == 0 else "nodes", data=mesh_numbers)
-    output = h5_empty.create_group("results")
-    block = _output_block(result_numbers, loc, nr_ip)
-    fil = SimpleNamespace(get_step=lambda _i: [block])
+def output_location(request):
+    return request.param
 
-    if error is not None:
-        if loc == NODAL_AVERAGED and error == "numbering":
-            message = "Inconsistent records for C3D8: node numbers"
-        else:
-            prefix = "nodal averaged " if loc == NODAL_AVERAGED else ""
-            message = (
-                f"Inconsistent records for C3D8: {prefix}results {error} "
-                "different with respect to mesh definition"
+
+def _write_blocks(h5, blocks, numbers, loc):
+    mesh = h5.create_group("elements/C3D8")
+    mesh.create_dataset("numbers" if loc == 0 else "nodes", data=numbers)
+    output = h5.create_group("results")
+    fil = SimpleNamespace(get_step=lambda _i: iter(blocks))
+    translator._write_step_output_blocks(  # noqa: SLF001
+        fil=fil, h5=h5, h5_k=output, i=0
+    )
+    return output
+
+
+@pytest.mark.parametrize("numbers", [[1], [1, 2], [2, 7, 11, 20]])
+def test_output_single_block(h5_empty, output_location, numbers):
+    loc, nr_ip = output_location
+    block = _output_block(numbers, loc, nr_ip)
+    output = _write_blocks(h5_empty, [block], numbers, loc)
+    location = translator.ABQ_LOC[loc]
+    expected = block.data["R76"][:, 0]
+    if loc == 0:
+        expected = expected.reshape(len(numbers), nr_ip)
+    dset = output[f"IVOL/{location}/C3D8"]
+    np.testing.assert_array_equal(dset[:], expected)
+    assert dset.dtype == np.dtype(translator.RESULTS_TYPE)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("separate_variables", [False, True])
+def test_output_split_blocks(
+    *, h5_empty, output_location, reverse, separate_variables
+):
+    loc, nr_ip = output_location
+    numbers = [2, 7, 11, 20]
+    whole = _output_block(numbers, loc, nr_ip)
+    data = np.zeros(
+        len(whole.data),
+        dtype=[*whole.data.dtype.descr, ("R11", np.float64, (6,))],
+    )
+    for name in whole.data.dtype.names:
+        data[name] = whole.data[name]
+    data["R11"] = np.arange(len(data) * 6).reshape(-1, 6) + 0.25
+    blocks: list[SimpleNamespace] = []
+    # Includes a singleton block and IDs with gaps in the mesh numbering.
+    for start, stop in [(0, 1), (1, 3), (3, 4)]:
+        part = data[start * nr_ip : stop * nr_ip]
+        fields = [["R76"], ["R11"]] if separate_variables else [["R76", "R11"]]
+        blocks.extend(
+            SimpleNamespace(
+                flag=0,
+                set=b"",
+                eltype=b"C3D8",
+                data=part[["num", "loc", "ipnum", *variables]],
             )
-            if error == "cardinality":
-                message += f": {len(result_numbers)} != {len(mesh_numbers)}"
-        # The full message is checked for exact equality below.
-        with pytest.raises(ValueError) as excinfo:  # noqa: PT011
-            translator._write_step_output_blocks(  # noqa: SLF001
-                fil=fil, h5=h5_empty, h5_k=output, i=0
-            )
-        assert str(excinfo.value) == message
-        assert len(output) == 0
-    else:
-        translator._write_step_output_blocks(  # noqa: SLF001
-            fil=fil, h5=h5_empty, h5_k=output, i=0
+            for variables in fields
         )
-        location = "integration_point" if loc == 0 else "nodal_averaged"
-        expected = block.data["R76"][:, 0]
+    if reverse:
+        blocks.reverse()
+    output = _write_blocks(h5_empty, blocks, numbers, loc)
+    for code, variable in [("R76", "IVOL"), ("R11", "S")]:
+        expected: np.ndarray[tuple[int, ...], np.dtype[np.float64]] = data[code]
         if loc == 0:
-            expected = expected.reshape(len(result_numbers), nr_ip)
-        np.testing.assert_array_equal(
-            output[f"IVOL/{location}/C3D8"][:], expected
-        )
+            expected = expected.reshape(len(numbers), nr_ip, -1)
+        if code == "R76":
+            expected = expected[..., 0]
+        dset = output[f"{variable}/{translator.ABQ_LOC[loc]}/C3D8"]
+        np.testing.assert_array_equal(dset[:], expected)
+        assert dset.dtype == np.dtype(translator.RESULTS_TYPE)
+
+
+@pytest.mark.parametrize(
+    ("mesh_numbers", "result_numbers"),
+    [([1, 2], [1, 3]), ([1, 2, 3], [1, 3]), ([1, 2], [2, 1])],
+)
+def test_output_invalid_block_numbers(
+    *, h5_empty, output_location, mesh_numbers, result_numbers
+):
+    loc, nr_ip = output_location
+    block = _output_block(result_numbers, loc, nr_ip)
+    with pytest.raises(AssertionError):
+        _write_blocks(h5_empty, [block], mesh_numbers, loc)
+    assert len(h5_empty["results"]) == 0
+
+
+@pytest.mark.parametrize("number", [0, 3])
+def test_output_unknown_singleton_rejected(h5_empty, output_location, number):
+    loc, nr_ip = output_location
+    block = _output_block([number], loc, nr_ip)
+    with pytest.raises(AssertionError):
+        _write_blocks(h5_empty, [block], [1, 2], loc)

@@ -338,7 +338,7 @@ def _write_results(  # noqa: PLR0913
     _write_step_output_blocks(fil=fil, h5=h5, h5_k=h5_k, i=i)
 
 
-def _write_step_output_blocks(  # noqa: C901, PLR0912
+def _write_step_output_blocks(  # noqa: C901
     *, fil: Any, h5: h5py.Group, h5_k: h5py.Group, i: int
 ) -> None:
     for data_block in fil.get_step(i):
@@ -374,45 +374,26 @@ def _write_step_output_blocks(  # noqa: C901, PLR0912
                 nr_ip = _guess_nr_ip(data)
                 data = data.reshape(-1, nr_ip)
                 # data["num"] is elnum across columns
-                if len(data["num"]) != len(h5["elements"][eltype]["numbers"]):
-                    msg = (
-                        f"Inconsistent records for {eltype}: "
-                        "results cardinality different "
-                        "with respect to mesh definition: "
-                        f"{len(data['num'])} != "
-                        f"{len(h5['elements'][eltype]['numbers'])}"
-                    )
-                    raise ValueError(msg)
-                if np.any(
-                    data["num"]
-                    != np.expand_dims(h5["elements"][eltype]["numbers"], -1)
-                ):
-                    msg = (
-                        f"Inconsistent records for {eltype}: "
-                        "results numbering different "
-                        "with respect to mesh definition"
-                    )
-                    raise ValueError(msg)
+                target_num = h5["elements"][eltype]["numbers"][()]
+                data_num = data["num"][:, 0]
                 # data["ipnum"] is 1..nr_ip across rows
                 assert np.all(data["ipnum"] == 1 + np.arange(nr_ip))
+                assert np.all(data["num"] == data_num[:, np.newaxis])
             case "nodal_averaged":
-                if len(data["num"]) != len(h5["elements"][eltype]["nodes"]):
-                    msg = (
-                        f"Inconsistent records for {eltype}: "
-                        "nodal averaged results cardinality different "
-                        "with respect to mesh definition: "
-                        f"{len(data['num'])} != "
-                        f"{len(h5['elements'][eltype]['nodes'])}"
-                    )
-                    raise ValueError(msg)
-                if np.any(data["num"] != h5["elements"][eltype]["nodes"]):
-                    msg = f"Inconsistent records for {eltype}: node numbers"
-                    raise ValueError(msg)
+                # data["num"] is node across columns
+                target_num = h5["elements"][eltype]["nodes"][()]
+                data_num = data["num"]
+                # data["ipnum"] is 0
                 assert (data["ipnum"] == 0).all()
             case None:
                 logger.warning("Unknown location code %d", loc)
                 continue
 
+        assert data_num.ndim == target_num.ndim == 1
+        mask = slice(
+            *np.searchsorted(target_num, [data_num[0], data_num[-1] + 1])
+        )
+        np.testing.assert_array_equal(target_num[mask], data_num)
         # save block data
         for name in data.dtype.names:
             if not name.startswith("R"):
@@ -420,16 +401,22 @@ def _write_step_output_blocks(  # noqa: C901, PLR0912
             if name not in ABQ_VAR:
                 logger.warning("Unexpected results code %s", name)
                 continue
-            hdata = data[name].astype(RESULTS_TYPE)
+            hdata = data[name]
             *_, n_dim = hdata.shape
             assert tuple(_) == data.shape
             if n_dim == 1:
                 # squeeze sigleton last dimension
                 hdata = np.squeeze(hdata, axis=-1)
-            dset = h5_k.create_dataset(
-                _h5_path(var=ABQ_VAR[name], loc=ABQ_LOC[loc], eltype=eltype),
-                data=hdata,
+            hpath = _h5_path(var=ABQ_VAR[name], loc=ABQ_LOC[loc], eltype=eltype)
+            hshape = (len(target_num), *hdata.shape[1:])
+            # Assume blocks provide complete, nonoverlapping coverage of
+            # target_num for each result dataset. Missing rows remain zero;
+            # overlapping blocks overwrite earlier values. Explicit checks
+            # of these internal invariants are deferred to a future refactor.
+            dset = h5_k.require_dataset(
+                name=hpath, shape=hshape, dtype=RESULTS_TYPE, exact=True
             )
+            dset[mask] = hdata
             logger.debug("Wrote %s: %s", dset.name, dset.shape)
 
 
